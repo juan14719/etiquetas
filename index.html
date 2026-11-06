@@ -1,0 +1,1535 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-900 text-slate-100">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Captura y Catalogación de Etiquetas SAP</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- Tesseract.js para OCR en el cliente -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <!-- Configuración PWA / Web App Manifest incrustado -->
+  <link rel="manifest" id="manifest-placeholder" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SAP Tag" />
+  <meta name="theme-color" content="#020617" />
+
+  <style>
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+    /* El lienzo maneja todo el renderizado y eventos táctiles */
+    #crop-canvas {
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      cursor: crosshair;
+    }
+  </style>
+</head>
+<body class="min-h-full flex flex-col font-sans antialiased bg-slate-950 text-slate-100">
+
+  <!-- Header Superior -->
+  <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center space-x-2">
+      <div class="p-2 bg-sky-500/10 text-sky-400 rounded-lg border border-sky-500/20">
+        <i data-lucide="tag" class="w-5 h-5"></i>
+      </div>
+      <div>
+        <h1 class="text-base font-bold tracking-tight text-white leading-tight">SAP Tag Capture</h1>
+        <p class="text-xs text-slate-400">Control de Calidad & Mantenimiento</p>
+      </div>
+    </div>
+    
+    <div class="flex items-center gap-2">
+      <!-- Botón de Instalación en Celular PWA -->
+      <button id="btn-install-app" title="Instalar aplicación en el móvil" class="hidden flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white shadow transition animate-pulse">
+        <i data-lucide="download-cloud" class="w-4 h-4"></i>
+        <span>Instalar App</span>
+      </button>
+
+      <!-- Botón de Configuración de SharePoint -->
+      <button id="btn-toggle-sp-config" title="Configurar destino SharePoint" class="relative p-2 text-slate-300 hover:text-white rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition">
+        <i data-lucide="cloud-upload" class="w-4 h-4 text-sky-400"></i>
+        <span id="sp-indicator" class="hidden absolute top-1 right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      </button>
+
+      <!-- Botón para ver historial rápido -->
+      <button id="btn-toggle-history" class="relative flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+        <i data-lucide="archive" class="w-4 h-4"></i>
+        <span>Historial</span>
+        <span id="badge-count" class="hidden ml-1 px-1.5 py-0.2 bg-sky-500 text-slate-950 font-bold text-[10px] rounded-full">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Stepper de Progreso -->
+  <nav class="bg-slate-900 border-b border-slate-800 px-4 py-2.5">
+    <div class="max-w-md mx-auto grid grid-cols-3 gap-2 text-center text-xs">
+      <div id="step-indicator-1" class="flex flex-col items-center gap-1 text-sky-400 font-semibold border-b-2 border-sky-400 pb-1">
+        <span class="flex items-center justify-center w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-[11px]">1</span>
+        <span>Capturar</span>
+      </div>
+      <div id="step-indicator-2" class="flex flex-col items-center gap-1 text-slate-500 font-medium border-b-2 border-transparent pb-1">
+        <span class="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-slate-400 text-[11px]">2</span>
+        <span>Encuadre</span>
+      </div>
+      <div id="step-indicator-3" class="flex flex-col items-center gap-1 text-slate-500 font-medium border-b-2 border-transparent pb-1">
+        <span class="flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-slate-400 text-[11px]">3</span>
+        <span>Guardar</span>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Contenedor Principal Dinámico -->
+  <main class="flex-1 max-w-xl w-full mx-auto p-4 flex flex-col justify-between">
+
+    <!-- PASO 1: CAPTURA O CARGA -->
+    <section id="step-1" class="flex-1 flex flex-col">
+      <div class="text-center mb-3">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Paso 1: Foto de la Placa o Etiqueta</h2>
+      </div>
+
+      <!-- Zona de Captura Directa (Sin streaming de video problemático) -->
+      <div class="flex-1 flex flex-col items-center justify-center min-h-[300px] border-2 border-dashed border-slate-700 bg-slate-900/60 rounded-2xl p-6 text-center">
+        <div class="w-20 h-20 bg-sky-500/10 text-sky-400 rounded-full flex items-center justify-center mb-4 border border-sky-500/20">
+          <i data-lucide="camera" class="w-10 h-10"></i>
+        </div>
+        <h3 class="text-base font-bold text-white mb-1">Captura tu Etiqueta SAP</h3>
+        <p class="text-xs text-slate-400 max-w-xs mb-6">
+          Toma una fotografía directa con tu cámara o selecciona una imagen de tu galería para recortarla.
+        </p>
+
+        <!-- Botón principal directo a la cámara del teléfono -->
+        <label class="w-full max-w-xs flex items-center justify-center gap-2.5 py-4 px-6 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white font-bold text-sm rounded-xl shadow-lg shadow-sky-600/30 cursor-pointer transition mb-3">
+          <i data-lucide="aperture" class="w-5 h-5"></i>
+          <span>Tomar Foto con Cámara</span>
+          <input id="camera-direct-input" type="file" accept="image/*" capture="environment" class="hidden" />
+        </label>
+
+        <!-- Botón secundario para galería -->
+        <label class="w-full max-w-xs flex items-center justify-center gap-2 py-3 px-6 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 font-medium text-xs rounded-xl border border-slate-700 cursor-pointer transition">
+          <i data-lucide="image" class="w-4 h-4 text-sky-400"></i>
+          <span>Elegir de la Galería</span>
+          <input id="file-input" type="file" accept="image/*" class="hidden" />
+        </label>
+      </div>
+    </section>
+
+    <!-- PASO 2: ENCUADRE Y RECORTE -->
+    <section id="step-2" class="hidden flex-1 flex flex-col">
+      <div class="flex items-center justify-between mb-2">
+        <div class="flex items-center gap-1.5">
+          <span id="detection-badge" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            <span>Bordes y Etiqueta Detectados</span>
+          </span>
+        </div>
+        <span class="text-xs text-slate-400">Arrastra esquinas o el recuadro</span>
+      </div>
+
+      <!-- Área de Lienzo de Recorte Interactivo Unificado -->
+      <div id="canvas-container" class="relative flex-1 min-h-[380px] max-h-[56vh] bg-slate-900 rounded-2xl overflow-hidden border border-slate-800 shadow-xl flex items-center justify-center p-2">
+        <canvas id="crop-canvas" class="max-w-full max-h-[52vh] object-contain rounded-lg border border-slate-700/60"></canvas>
+      </div>
+
+      <!-- Barra de Herramientas de Edición -->
+      <div class="mt-3 flex items-center justify-between gap-2 py-2 bg-slate-900 border border-slate-800/90 rounded-xl px-3">
+        <div class="flex items-center gap-1.5">
+          <button id="btn-rotate-ccw" title="Rotar 90° Izquierda" class="p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 transition">
+            <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+          </button>
+          <button id="btn-rotate-cw" title="Rotar 90° Derecha" class="p-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-300 transition">
+            <i data-lucide="rotate-cw" class="w-4 h-4"></i>
+          </button>
+        </div>
+        
+        <div class="flex items-center gap-2">
+          <button id="btn-auto-detect" title="Re-analizar bordes y texto" class="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 text-xs font-bold border border-sky-500/40 transition">
+            <i data-lucide="scan" class="w-4 h-4"></i>
+            <span>Auto-Ajustar</span>
+          </button>
+          <button id="btn-reset-bounds" title="Restablecer marco completo" class="flex items-center gap-1 px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition">
+            <i data-lucide="maximize" class="w-3.5 h-3.5"></i>
+            <span>Todo</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Acciones de Navegación del Paso 2 -->
+      <div class="mt-4 grid grid-cols-2 gap-3">
+        <button id="btn-back-to-capture" class="flex items-center justify-center gap-2 p-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-slate-300 text-sm font-medium transition">
+          <i data-lucide="arrow-left" class="w-4 h-4"></i>
+          <span>Volver a tomar</span>
+        </button>
+        <button id="btn-apply-crop" class="relative flex items-center justify-center gap-2 p-3 bg-sky-600 hover:bg-sky-500 active:scale-95 text-white rounded-xl text-sm font-bold shadow-lg shadow-sky-600/20 transition">
+          <span id="btn-apply-crop-text">Confirmar y Cortar</span>
+          <i id="btn-apply-crop-icon" data-lucide="check" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </section>
+
+    <!-- PASO 3: FORMULARIO Y GUARDADO -->
+    <section id="step-3" class="hidden flex-1 flex flex-col space-y-4">
+      <div class="text-center">
+        <h2 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Paso 3: Asignación de Datos SAP</h2>
+      </div>
+
+      <!-- Banner de estado de detección OCR -->
+      <div id="ocr-status-card" class="hidden p-3 rounded-xl border flex items-center justify-between text-xs transition">
+        <div class="flex items-center gap-2">
+          <i id="ocr-status-icon" data-lucide="scan-text" class="w-4 h-4"></i>
+          <span id="ocr-status-text">Analizando texto de la placa...</span>
+        </div>
+        <button id="btn-retry-ocr" class="underline hover:text-white font-medium ml-2">Re-escanear</button>
+      </div>
+
+      <!-- Vista previa miniatura de la etiqueta recortada -->
+      <div class="flex items-center gap-4 p-3 bg-slate-900 border border-slate-800 rounded-xl">
+        <div class="w-20 h-20 bg-black rounded-lg overflow-hidden border border-slate-700 flex-shrink-0 flex items-center justify-center">
+          <img id="final-preview-img" class="w-full h-full object-contain" src="" alt="Recorte Final" />
+        </div>
+        <div class="flex-1 min-w-0">
+          <p class="text-xs text-slate-400 uppercase font-semibold">Imagen lista para guardar</p>
+          <p id="image-dimensions" class="text-[11px] text-slate-500 mt-0.5">Resolución: -</p>
+          <button id="btn-re-crop" class="mt-1.5 text-xs text-sky-400 hover:text-sky-300 flex items-center gap-1 font-medium">
+            <i data-lucide="crop" class="w-3.5 h-3.5"></i>
+            Ajustar recorte de nuevo
+          </button>
+        </div>
+      </div>
+
+      <!-- Campos del Formulario -->
+      <div class="space-y-4 bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+        <!-- Campo SAP -->
+        <div>
+          <div class="flex items-center justify-between mb-1.5">
+            <label for="input-sap" class="block text-xs font-semibold uppercase tracking-wider text-slate-300">
+              Número SAP <span class="text-rose-400">*</span>
+            </label>
+            <span id="ocr-detected-badge" class="hidden text-[11px] font-medium text-emerald-400 flex items-center gap-1">
+              <i data-lucide="check-check" class="w-3.5 h-3.5"></i> Auto-detectado (Editable)
+            </span>
+          </div>
+          <div class="relative">
+            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+              <i data-lucide="hash" class="w-4 h-4"></i>
+            </div>
+            <input 
+              type="text" 
+              id="input-sap" 
+              inputmode="numeric"
+              placeholder="Ej. 10004567" 
+              maxlength="20"
+              class="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-700 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-lg text-white font-mono text-base placeholder-slate-600 outline-none transition"
+            />
+          </div>
+          <p id="sap-error" class="hidden text-rose-400 text-xs mt-1">Por favor ingresa el número SAP.</p>
+        </div>
+
+        <!-- Selector de Tipo de Servicio -->
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-2">
+            Tipo de Servicio <span class="text-rose-400">*</span>
+          </label>
+          <div class="grid grid-cols-3 gap-2">
+            <label class="relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-700 bg-slate-950/60 cursor-pointer hover:border-slate-600 transition text-center service-radio-card">
+              <input type="radio" name="service-type" value="verificacion" class="sr-only" />
+              <i data-lucide="clipboard-check" class="w-5 h-5 mb-1 text-slate-400"></i>
+              <span class="text-xs font-medium text-slate-300">Verificación</span>
+            </label>
+
+            <label class="relative flex flex-col items-center justify-center p-3 rounded-xl border border-slate-700 bg-slate-950/60 cursor-pointer hover:border-slate-600 transition text-center service-radio-card">
+              <input type="radio" name="service-type" value="calibracion" class="sr-only" />
+              <i data-lucide="sliders" class="w-5 h-5 mb-1 text-slate-400"></i>
+              <span class="text-xs font-medium text-slate-300">Calibración</span>
+            </label>
+
+            <label class="relative flex flex-col items-center justify-center p-3 rounded-xl border border-sky-500 bg-sky-500/10 cursor-pointer hover:border-sky-400 transition text-center service-radio-card">
+              <input type="radio" name="service-type" value="mantenimiento" checked class="sr-only" />
+              <i data-lucide="wrench" class="w-5 h-5 mb-1 text-sky-400"></i>
+              <span class="text-xs font-semibold text-sky-300">Mantenimiento</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Previsualización del Nombre de Archivo -->
+        <div class="p-3 bg-slate-950 border border-slate-800 rounded-lg">
+          <p class="text-[11px] font-medium text-slate-400 uppercase tracking-wide">Nombre resultante del archivo:</p>
+          <div class="flex items-center gap-2 mt-1 text-sky-300 font-mono text-sm break-all">
+            <i data-lucide="file-check" class="w-4 h-4 text-sky-400 flex-shrink-0"></i>
+            <span id="label-filename" class="font-semibold">_mantenimiento.jpg</span>
+          </div>
+          <p id="sp-destination-label" class="hidden text-[11px] text-emerald-400/90 mt-1.5 flex items-center gap-1">
+            <i data-lucide="cloud-check" class="w-3.5 h-3.5"></i> Sincronización SharePoint activa
+          </p>
+        </div>
+      </div>
+
+      <!-- Acciones Finales -->
+      <div class="pt-2">
+        <button id="btn-save-download" class="w-full flex items-center justify-center gap-2.5 p-3.5 bg-emerald-600 hover:bg-emerald-500 active:scale-[0.99] text-white font-bold text-sm rounded-xl shadow-lg shadow-emerald-600/20 transition">
+          <i id="btn-save-icon" data-lucide="download" class="w-5 h-5"></i>
+          <span id="btn-save-text">Guardar y Descargar JPG</span>
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Modal de Configuración SharePoint / Power Automate Webhook -->
+  <div id="sp-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl overflow-hidden flex flex-col">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2 text-sky-400">
+          <i data-lucide="cloud-cog" class="w-5 h-5"></i>
+          <h3 class="font-bold text-slate-100 text-sm">Destino Automático SharePoint</h3>
+        </div>
+        <button id="btn-close-sp-modal" class="p-1.5 text-slate-400 hover:text-white rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="p-5 space-y-4 text-xs">
+        <div class="p-3 bg-sky-950/40 border border-sky-800/50 rounded-xl text-sky-200">
+          <p class="font-semibold mb-1 flex items-center gap-1.5">
+            <i data-lucide="info" class="w-4 h-4 text-sky-400"></i> ¿Cómo conectar con tu carpeta de SharePoint?
+          </p>
+          <p class="text-[11px] leading-relaxed text-slate-300">
+            En tu cuenta de Microsoft 365, crea un flujo en <strong>Power Automate</strong> con el trigger: <br/>
+            <em>"Cuando se recibe una solicitud HTTP"</em> y la acción <em>"Crear archivo en SharePoint"</em>. Pega la URL del flujo aquí. Cada foto se subirá automáticamente a la biblioteca deseada con el nombre generado.
+          </p>
+        </div>
+
+        <div>
+          <label for="sp-webhook-url" class="block font-semibold text-slate-300 uppercase tracking-wider text-[11px] mb-1.5">
+            URL del Webhook / Flujo SharePoint
+          </label>
+          <input 
+            type="url" 
+            id="sp-webhook-url" 
+            placeholder="https://prod-xx.westus.logic.azure.com/workflows/..."
+            class="w-full px-3 py-2.5 bg-slate-950 border border-slate-700 focus:border-sky-500 focus:ring-1 focus:ring-sky-500 rounded-lg text-white font-mono text-xs placeholder-slate-600 outline-none transition"
+          />
+        </div>
+
+        <div class="flex items-center justify-between pt-1">
+          <div>
+            <span class="font-semibold text-slate-200 block text-xs">Subida Automática a SharePoint</span>
+            <span class="text-[11px] text-slate-400">Enviar imagen al guardar además de descargarla</span>
+          </div>
+          <label class="relative inline-flex items-center cursor-pointer">
+            <input type="checkbox" id="sp-enabled-toggle" class="sr-only peer">
+            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+          </label>
+        </div>
+      </div>
+
+      <div class="p-4 border-t border-slate-800 bg-slate-950 flex justify-end gap-2">
+        <button id="btn-cancel-sp" class="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium">Cancelar</button>
+        <button id="btn-save-sp-config" class="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold">Guardar Configuración</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal / Drawer de Historial de Sesión -->
+  <div id="history-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex justify-end">
+    <div class="w-full max-w-md bg-slate-900 border-l border-slate-800 h-full flex flex-col shadow-2xl">
+      <div class="p-4 border-b border-slate-800 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i data-lucide="folder-archive" class="w-5 h-5 text-sky-400"></i>
+          <h3 class="font-bold text-slate-100">Etiquetas Procesadas</h3>
+        </div>
+        <button id="btn-close-history" class="p-2 text-slate-400 hover:text-white rounded-lg">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      
+      <div id="history-list" class="flex-1 overflow-y-auto p-4 space-y-3">
+        <!-- Renderizado dinámico -->
+      </div>
+
+      <div class="p-4 border-t border-slate-800 bg-slate-950/50 flex justify-between items-center text-xs text-slate-400">
+        <span id="history-total">0 etiquetas guardadas</span>
+        <button id="btn-clear-history" class="text-rose-400 hover:text-rose-300 font-medium">Vaciar historial</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast de Notificaciones -->
+  <div id="toast" class="pointer-events-none fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 bg-slate-800 border border-slate-700 text-white text-xs px-4 py-2.5 rounded-full shadow-2xl opacity-0 transition-opacity duration-300">
+    <i id="toast-icon" data-lucide="check-circle" class="w-4 h-4 text-emerald-400"></i>
+    <span id="toast-text">Acción realizada</span>
+  </div>
+
+  <!-- Modal Guía para Instalar en iPhone/iOS -->
+  <div id="ios-install-modal" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-sm bg-slate-900 border border-slate-800 rounded-2xl p-5 text-center space-y-4">
+      <div class="w-12 h-12 bg-sky-500/10 text-sky-400 rounded-xl mx-auto flex items-center justify-center">
+        <i data-lucide="smartphone" class="w-6 h-6"></i>
+      </div>
+      <h3 class="font-bold text-white text-sm">Instalar en iPhone / iPad</h3>
+      <div class="text-left text-xs text-slate-300 space-y-2 bg-slate-950 p-3 rounded-xl border border-slate-800">
+        <p>1. Toca el botón <strong>Compartir</strong> <i data-lucide="share" class="inline w-3.5 h-3.5 text-sky-400"></i> en Safari (barra inferior).</p>
+        <p>2. Desliza hacia abajo y pulsa <strong>"Agregar a pantalla de inicio"</strong> <i data-lucide="plus-square" class="inline w-3.5 h-3.5 text-sky-400"></i>.</p>
+        <p>3. Pulsa <strong>Agregar</strong> en la esquina superior derecha.</p>
+      </div>
+      <button id="btn-close-ios-modal" class="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold">
+        Entendido
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // Estado de la aplicación
+    const state = {
+      sourceImage: new Image(),
+      rotationAngle: 0,
+      // Rectángulo de recorte expresado en píxeles de la imagen rotada
+      cropRect: { x: 0, y: 0, w: 0, h: 0 },
+      dragAction: null, // 'tl', 'tr', 'br', 'bl', 'move', o null
+      dragStart: { x: 0, y: 0 },
+      initialRect: null,
+      croppedBlob: null,
+      history: [],
+      sharePoint: {
+        enabled: localStorage.getItem('sp_enabled') === 'true',
+        webhookUrl: localStorage.getItem('sp_webhook_url') || ''
+      }
+    };
+
+    // Referencias DOM
+    const cameraDirectInput = document.getElementById('camera-direct-input');
+    const fileInput = document.getElementById('file-input');
+    const cropCanvas = document.getElementById('crop-canvas');
+    const finalPreviewImg = document.getElementById('final-preview-img');
+    const imageDimensions = document.getElementById('image-dimensions');
+    const inputSap = document.getElementById('input-sap');
+    const sapError = document.getElementById('sap-error');
+    const labelFilename = document.getElementById('label-filename');
+    const toast = document.getElementById('toast');
+    const toastText = document.getElementById('toast-text');
+    const toastIcon = document.getElementById('toast-icon');
+    const ocrStatusCard = document.getElementById('ocr-status-card');
+    const ocrStatusIcon = document.getElementById('ocr-status-icon');
+    const ocrStatusText = document.getElementById('ocr-status-text');
+    const ocrDetectedBadge = document.getElementById('ocr-detected-badge');
+    const btnRetryOcr = document.getElementById('btn-retry-ocr');
+    const btnApplyCrop = document.getElementById('btn-apply-crop');
+    const btnApplyCropText = document.getElementById('btn-apply-crop-text');
+    const btnApplyCropIcon = document.getElementById('btn-apply-crop-icon');
+    const spModal = document.getElementById('sp-modal');
+    const btnToggleSpConfig = document.getElementById('btn-toggle-sp-config');
+    const btnCloseSpModal = document.getElementById('btn-close-sp-modal');
+    const btnCancelSp = document.getElementById('btn-cancel-sp');
+    const btnSaveSpConfig = document.getElementById('btn-save-sp-config');
+    const spWebhookUrlInput = document.getElementById('sp-webhook-url');
+    const spEnabledToggle = document.getElementById('sp-enabled-toggle');
+    const spIndicator = document.getElementById('sp-indicator');
+    const spDestinationLabel = document.getElementById('sp-destination-label');
+    const btnSaveIcon = document.getElementById('btn-save-icon');
+    const btnSaveText = document.getElementById('btn-save-text');
+    const btnInstallApp = document.getElementById('btn-install-app');
+    const iosInstallModal = document.getElementById('ios-install-modal');
+    const btnCloseIosModal = document.getElementById('btn-close-ios-modal');
+
+    // Secciones
+    const step1 = document.getElementById('step-1');
+    const step2 = document.getElementById('step-2');
+    const step3 = document.getElementById('step-3');
+    const stepInd1 = document.getElementById('step-indicator-1');
+    const stepInd2 = document.getElementById('step-indicator-2');
+    const stepInd3 = document.getElementById('step-indicator-3');
+
+    function refreshIcons() {
+      lucide.createIcons();
+    }
+
+    function showToast(message, type = 'success') {
+      toastText.innerText = message;
+      if (type === 'success') {
+        toastIcon.setAttribute('data-lucide', 'check-circle');
+        toastIcon.className = 'w-4 h-4 text-emerald-400';
+      } else {
+        toastIcon.setAttribute('data-lucide', 'alert-circle');
+        toastIcon.className = 'w-4 h-4 text-rose-400';
+      }
+      refreshIcons();
+
+      toast.classList.remove('opacity-0');
+      toast.classList.add('opacity-100');
+
+      setTimeout(() => {
+        toast.classList.remove('opacity-100');
+        toast.classList.add('opacity-0');
+      }, 2500);
+    }
+
+    function goToStep(step) {
+      step1.classList.add('hidden');
+      step2.classList.add('hidden');
+      step3.classList.add('hidden');
+
+      const baseStyle = 'flex flex-col items-center gap-1 text-slate-500 font-medium border-b-2 border-transparent pb-1';
+      const activeStyle = 'flex flex-col items-center gap-1 text-sky-400 font-semibold border-b-2 border-sky-400 pb-1';
+
+      stepInd1.className = baseStyle;
+      stepInd2.className = baseStyle;
+      stepInd3.className = baseStyle;
+
+      stepInd1.querySelector('span').className = 'flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-slate-400 text-[11px]';
+      stepInd2.querySelector('span').className = 'flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-slate-400 text-[11px]';
+      stepInd3.querySelector('span').className = 'flex items-center justify-center w-5 h-5 rounded-full bg-slate-800 text-slate-400 text-[11px]';
+
+      if (step === 1) {
+        step1.classList.remove('hidden');
+        stepInd1.className = activeStyle;
+        stepInd1.querySelector('span').className = 'flex items-center justify-center w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-[11px]';
+      } else if (step === 2) {
+        step2.classList.remove('hidden');
+        stepInd2.className = activeStyle;
+        stepInd2.querySelector('span').className = 'flex items-center justify-center w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-[11px]';
+        setTimeout(() => initEditor(), 50);
+      } else if (step === 3) {
+        step3.classList.remove('hidden');
+        stepInd3.className = activeStyle;
+        stepInd3.querySelector('span').className = 'flex items-center justify-center w-5 h-5 rounded-full bg-sky-500/20 text-sky-300 text-[11px]';
+        updateFileNamePreview();
+      }
+      refreshIcons();
+    }
+
+    // Canvas interno en memoria con la imagen orientada correctamente
+    let rotatedBufferCanvas = document.createElement('canvas');
+
+    function prepareRotatedBuffer() {
+      const img = state.sourceImage;
+      const is90or270 = state.rotationAngle % 180 !== 0;
+      const w = is90or270 ? img.naturalHeight : img.naturalWidth;
+      const h = is90or270 ? img.naturalWidth : img.naturalHeight;
+
+      rotatedBufferCanvas.width = w;
+      rotatedBufferCanvas.height = h;
+
+      const ctx = rotatedBufferCanvas.getContext('2d');
+      ctx.clearRect(0, 0, w, h);
+      ctx.save();
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate((state.rotationAngle * Math.PI) / 180);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      ctx.restore();
+    }
+
+    // ALGORITMO AVANZADO DE DETECCIÓN RECTANGULAR POR CONTRASTE DE COLOR Y FORMA
+    function autoDetectTagBounds() {
+      const w = rotatedBufferCanvas.width;
+      const h = rotatedBufferCanvas.height;
+
+      // Escalar la imagen a una resolución de análisis óptima para segmentación cromática
+      const maxDim = 400;
+      const scale = Math.min(1, maxDim / Math.max(w, h));
+      const sw = Math.max(10, Math.floor(w * scale));
+      const sh = Math.max(10, Math.floor(h * scale));
+
+      const analysisCanvas = document.createElement('canvas');
+      analysisCanvas.width = sw;
+      analysisCanvas.height = sh;
+      const sctx = analysisCanvas.getContext('2d', { willReadFrequently: true });
+      sctx.drawImage(rotatedBufferCanvas, 0, 0, sw, sh);
+
+      const imgData = sctx.getImageData(0, 0, sw, sh);
+      const data = imgData.data;
+      const totalPixels = sw * sh;
+
+      // 1. Estimar el color de fondo muestreando el perímetro exterior de la foto
+      let bgR = 0, bgG = 0, bgB = 0, borderCount = 0;
+      for (let x = 0; x < sw; x++) {
+        // Fila superior e inferior
+        const topIdx = (0 * sw + x) * 4;
+        const botIdx = ((sh - 1) * sw + x) * 4;
+        bgR += data[topIdx] + data[botIdx];
+        bgG += data[topIdx + 1] + data[botIdx + 1];
+        bgB += data[topIdx + 2] + data[botIdx + 2];
+        borderCount += 2;
+      }
+      for (let y = 1; y < sh - 1; y++) {
+        // Columna izquierda y derecha
+        const leftIdx = (y * sw + 0) * 4;
+        const rightIdx = (y * sw + (sw - 1)) * 4;
+        bgR += data[leftIdx] + data[rightIdx];
+        bgG += data[leftIdx + 1] + data[rightIdx + 1];
+        bgB += data[leftIdx + 2] + data[rightIdx + 2];
+        borderCount += 2;
+      }
+      bgR /= borderCount;
+      bgG /= borderCount;
+      bgB /= borderCount;
+
+      // 2. Mapa de diferencia de color euclidiana respecto al fondo (para aislar etiquetas blancas, metálicas o amarillas sobre superficies oscuras o viceversa)
+      const colorDiff = new Float32Array(totalPixels);
+      let minDiff = 9999, maxDiff = 0;
+
+      for (let i = 0; i < totalPixels; i++) {
+        const p = i * 4;
+        const dr = data[p] - bgR;
+        const dg = data[p + 1] - bgG;
+        const db = data[p + 2] - bgB;
+        // Distancia euclidiana ponderada por luminancia perceptiva
+        const dist = Math.sqrt(0.299 * (dr * dr) + 0.587 * (dg * dg) + 0.114 * (db * db));
+        colorDiff[i] = dist;
+        if (dist < minDiff) minDiff = dist;
+        if (dist > maxDiff) maxDiff = dist;
+      }
+
+      // 3. Umbralización Adaptativa (Otsu sobre el mapa de contraste de color)
+      const bins = 64;
+      const hist = new Int32Array(bins);
+      const diffRange = maxDiff - minDiff || 1;
+
+      for (let i = 0; i < totalPixels; i++) {
+        const bin = Math.min(bins - 1, Math.floor(((colorDiff[i] - minDiff) / diffRange) * bins));
+        hist[bin]++;
+      }
+
+      let sum = 0;
+      for (let t = 0; t < bins; t++) sum += t * hist[t];
+      let sumB = 0, wB = 0, maxVariance = 0, thresholdBin = 0;
+
+      for (let t = 0; t < bins; t++) {
+        wB += hist[t];
+        if (wB === 0) continue;
+        const wF = totalPixels - wB;
+        if (wF === 0) break;
+
+        sumB += t * hist[t];
+        const mB = sumB / wB;
+        const mF = (sum - sumB) / wF;
+        const variance = wB * wF * (mB - mF) * (mB - mF);
+
+        if (variance > maxVariance) {
+          maxVariance = variance;
+          thresholdBin = t;
+        }
+      }
+
+      const diffThreshold = minDiff + (thresholdBin / bins) * diffRange;
+
+      // 4. Máscara binaria con filtro morfológico simple (para rellenar texto interno de la placa)
+      const binary = new Uint8Array(totalPixels);
+      for (let i = 0; i < totalPixels; i++) {
+        binary[i] = colorDiff[i] >= diffThreshold ? 1 : 0;
+      }
+
+      // 5. Búsqueda y puntuación de rectángulos candidatos (Bounding Boxes de componentes)
+      const visited = new Uint8Array(totalPixels);
+      let bestRect = null;
+      let highestScore = -1;
+
+      for (let y = 1; y < sh - 1; y++) {
+        for (let x = 1; x < sw - 1; x++) {
+          const idx = y * sw + x;
+          if (binary[idx] === 1 && !visited[idx]) {
+            // BFS para obtener el componente conexo
+            let minX = x, maxX = x, minY = y, maxY = y;
+            let pixelCount = 0;
+            const queue = [idx];
+            visited[idx] = 1;
+
+            while (queue.length > 0) {
+              const cur = queue.pop();
+              const cy = Math.floor(cur / sw);
+              const cx = cur % sw;
+              pixelCount++;
+
+              if (cx < minX) minX = cx;
+              if (cx > maxX) maxX = cx;
+              if (cy < minY) minY = cy;
+              if (cy > maxY) maxY = cy;
+
+              // Vecinos (4 direcciones)
+              const neighbors = [cur - 1, cur + 1, cur - sw, cur + sw];
+              for (let n = 0; n < 4; n++) {
+                const nIdx = neighbors[n];
+                if (nIdx >= 0 && nIdx < totalPixels && binary[nIdx] === 1 && !visited[nIdx]) {
+                  visited[nIdx] = 1;
+                  queue.push(nIdx);
+                }
+              }
+            }
+
+            const rw = maxX - minX + 1;
+            const rh = maxY - minY + 1;
+            const bboxArea = rw * rh;
+
+            // Filtrar ruido pequeño o que ocupe casi toda la imagen
+            if (bboxArea > totalPixels * 0.04 && bboxArea < totalPixels * 0.94) {
+              // Calcular rectangularidad (Solidez: relación entre píxeles del objeto y el área de la caja delimitadora)
+              const rectangularSolidity = pixelCount / bboxArea;
+              const aspectRatio = rw / rh;
+
+              // Una etiqueta suele tener aspecto horizontal o vertical entre 1:3 y 3:1 y alta solidez rectangular
+              if (rectangularSolidity > 0.45 && aspectRatio >= 0.35 && aspectRatio <= 3.8) {
+                // Puntuación favoreciendo rectángulos bien formados, tamaño representativo y posición central
+                const centerX = (minX + maxX) / 2;
+                const centerY = (minY + maxY) / 2;
+                const distToCenter = Math.hypot(centerX - sw / 2, centerY - sh / 2) / Math.hypot(sw / 2, sh / 2);
+                const centralityScore = 1 - distToCenter * 0.4;
+
+                const score = (bboxArea / totalPixels) * rectangularSolidity * centralityScore;
+
+                if (score > highestScore) {
+                  highestScore = score;
+                  bestRect = { minX, minY, rw, rh };
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // Si encontramos una etiqueta rectangular nítida por color y bordes
+      if (bestRect) {
+        // Añadir margen de holgura del 3.5% para preservar los bordes físicos de la placa
+        const padX = bestRect.rw * 0.035;
+        const padY = bestRect.rh * 0.035;
+
+        const rx = Math.max(0, (bestRect.minX - padX) / scale);
+        const ry = Math.max(0, (bestRect.minY - padY) / scale);
+        const rw = Math.min(w - rx, (bestRect.rw + padX * 2) / scale);
+        const rh = Math.min(h - ry, (bestRect.rh + padY * 2) / scale);
+
+        return { x: rx, y: ry, w: rw, h: rh };
+      }
+
+      // Fallback si la imagen no presenta un contraste dominante claro
+      const defMarginX = w * 0.10;
+      const defMarginY = h * 0.15;
+      return {
+        x: defMarginX,
+        y: defMarginY,
+        w: w - defMarginX * 2,
+        h: h - defMarginY * 2
+      };
+    }
+
+    // Inicializar editor
+    function initEditor(forceAutoDetect = true) {
+      prepareRotatedBuffer();
+      const w = rotatedBufferCanvas.width;
+      const h = rotatedBufferCanvas.height;
+
+      cropCanvas.width = w;
+      cropCanvas.height = h;
+
+      if (forceAutoDetect || state.cropRect.w === 0) {
+        state.cropRect = autoDetectTagBounds();
+        showToast('Etiqueta y bordes auto-detectados', 'success');
+      }
+
+      drawEditorCanvas();
+    }
+
+    // DIBUJAR TODO DIRECTO EN EL CANVAS (MÁXIMA VELOCIDAD Y FIABILIDAD TÁCTIL)
+    function drawEditorCanvas() {
+      const ctx = cropCanvas.getContext('2d');
+      const w = cropCanvas.width;
+      const h = cropCanvas.height;
+
+      // 1. Dibujar la imagen base
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(rotatedBufferCanvas, 0, 0);
+
+      const r = state.cropRect;
+
+      // 2. Oscurecer el área exterior (máscara de recorte)
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+      ctx.fillRect(0, 0, w, r.y); // superior
+      ctx.fillRect(0, r.y + r.h, w, h - (r.y + r.h)); // inferior
+      ctx.fillRect(0, r.y, r.x, r.h); // izquierda
+      ctx.fillRect(r.x + r.w, r.y, w - (r.x + r.w), r.h); // derecha
+
+      // 3. Recuadro delimitador con resplandor
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = Math.max(3, Math.round(w / 350));
+      ctx.strokeRect(r.x, r.y, r.w, r.h);
+
+      // Líneas guía internas (regla de los tercios)
+      ctx.strokeStyle = 'rgba(56, 189, 248, 0.35)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(r.x + r.w / 3, r.y);
+      ctx.lineTo(r.x + r.w / 3, r.y + r.h);
+      ctx.moveTo(r.x + (r.w * 2) / 3, r.y);
+      ctx.lineTo(r.x + (r.w * 2) / 3, r.y + r.h);
+      ctx.moveTo(r.x, r.y + r.h / 3);
+      ctx.lineTo(r.x + r.w, r.y + r.h / 3);
+      ctx.moveTo(r.x, r.y + (r.h * 2) / 3);
+      ctx.lineTo(r.x + r.w, r.y + (r.h * 2) / 3);
+      ctx.stroke();
+
+      // 4. Dibujar manillas táctiles en las 4 esquinas
+      const handleRadius = Math.max(16, Math.round(w / 45));
+      const corners = [
+        { x: r.x, y: r.y }, // tl
+        { x: r.x + r.w, y: r.y }, // tr
+        { x: r.x + r.w, y: r.y + r.h }, // br
+        { x: r.x, y: r.y + r.h } // bl
+      ];
+
+      corners.forEach((pt) => {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, handleRadius, 0, Math.PI * 2);
+        ctx.fillStyle = '#0ea5e9';
+        ctx.fill();
+        ctx.lineWidth = Math.max(3, Math.round(handleRadius * 0.25));
+        ctx.strokeStyle = '#ffffff';
+        ctx.stroke();
+
+        // Punto central blanco
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, handleRadius * 0.3, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+      });
+    }
+
+    // GESTIÓN DE EVENTOS TÁCTILES Y DE RATÓN MEDIANTE POINTER EVENTS
+    function getCanvasCoords(e) {
+      const rect = cropCanvas.getBoundingClientRect();
+      const scaleX = cropCanvas.width / rect.width;
+      const scaleY = cropCanvas.height / rect.height;
+      return {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+      };
+    }
+
+    function getTouchTarget(pos) {
+      const r = state.cropRect;
+      // Umbral de toque muy generoso para pantallas táctiles (40 a 60px)
+      const rect = cropCanvas.getBoundingClientRect();
+      const displayScale = cropCanvas.width / rect.width;
+      const hitRadius = 45 * displayScale;
+
+      const dTL = Math.hypot(pos.x - r.x, pos.y - r.y);
+      if (dTL <= hitRadius) return 'tl';
+
+      const dTR = Math.hypot(pos.x - (r.x + r.w), pos.y - r.y);
+      if (dTR <= hitRadius) return 'tr';
+
+      const dBR = Math.hypot(pos.x - (r.x + r.w), pos.y - (r.y + r.h));
+      if (dBR <= hitRadius) return 'br';
+
+      const dBL = Math.hypot(pos.x - r.x, pos.y - (r.y + r.h));
+      if (dBL <= hitRadius) return 'bl';
+
+      // Si tocó dentro del recuadro, mover el recuadro completo
+      if (pos.x >= r.x && pos.x <= r.x + r.w && pos.y >= r.y && pos.y <= r.y + r.h) {
+        return 'move';
+      }
+
+      return null;
+    }
+
+    cropCanvas.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      cropCanvas.setPointerCapture(e.pointerId);
+
+      const pos = getCanvasCoords(e);
+      const action = getTouchTarget(pos);
+
+      if (action) {
+        state.dragAction = action;
+        state.dragStart = pos;
+        state.initialRect = { ...state.cropRect };
+      }
+    });
+
+    cropCanvas.addEventListener('pointermove', (e) => {
+      if (!state.dragAction) return;
+      e.preventDefault();
+
+      const pos = getCanvasCoords(e);
+      const dx = pos.x - state.dragStart.x;
+      const dy = pos.y - state.dragStart.y;
+      const init = state.initialRect;
+      const maxW = cropCanvas.width;
+      const maxH = cropCanvas.height;
+      const minSize = 40;
+
+      let { x, y, w, h } = init;
+
+      switch (state.dragAction) {
+        case 'tl': {
+          const newX = Math.min(Math.max(0, init.x + dx), init.x + init.w - minSize);
+          const newY = Math.min(Math.max(0, init.y + dy), init.y + init.h - minSize);
+          w = (init.x + init.w) - newX;
+          h = (init.y + init.h) - newY;
+          x = newX;
+          y = newY;
+          break;
+        }
+        case 'tr': {
+          const newY = Math.min(Math.max(0, init.y + dy), init.y + init.h - minSize);
+          const newRight = Math.max(init.x + minSize, Math.min(maxW, init.x + init.w + dx));
+          w = newRight - init.x;
+          h = (init.y + init.h) - newY;
+          y = newY;
+          break;
+        }
+        case 'br': {
+          const newRight = Math.max(init.x + minSize, Math.min(maxW, init.x + init.w + dx));
+          const newBottom = Math.max(init.y + minSize, Math.min(maxH, init.y + init.h + dy));
+          w = newRight - init.x;
+          h = newBottom - init.y;
+          break;
+        }
+        case 'bl': {
+          const newX = Math.min(Math.max(0, init.x + dx), init.x + init.w - minSize);
+          const newBottom = Math.max(init.y + minSize, Math.min(maxH, init.y + init.h + dy));
+          w = (init.x + init.w) - newX;
+          h = newBottom - init.y;
+          x = newX;
+          break;
+        }
+        case 'move': {
+          x = Math.max(0, Math.min(maxW - init.w, init.x + dx));
+          y = Math.max(0, Math.min(maxH - init.h, init.y + dy));
+          break;
+        }
+      }
+
+      state.cropRect = { x, y, w, h };
+      drawEditorCanvas();
+    });
+
+    function endDrag(e) {
+      if (state.dragAction) {
+        try {
+          cropCanvas.releasePointerCapture(e.pointerId);
+        } catch (_) {}
+        state.dragAction = null;
+      }
+    }
+
+    cropCanvas.addEventListener('pointerup', endDrag);
+    cropCanvas.addEventListener('pointercancel', endDrag);
+
+    // Cargar y procesar imagen seleccionada
+    function handleImageFile(file) {
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        state.rotationAngle = 0;
+        state.cropRect = { x: 0, y: 0, w: 0, h: 0 };
+        state.sourceImage = new Image();
+        state.sourceImage.onload = () => {
+          goToStep(2);
+        };
+        state.sourceImage.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    cameraDirectInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleImageFile(e.target.files[0]);
+        cameraDirectInput.value = '';
+      }
+    });
+
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        handleImageFile(e.target.files[0]);
+        fileInput.value = '';
+      }
+    });
+
+    // Rotación
+    document.getElementById('btn-rotate-ccw').addEventListener('click', () => {
+      state.rotationAngle = (state.rotationAngle - 90 + 360) % 360;
+      initEditor(true);
+    });
+
+    document.getElementById('btn-rotate-cw').addEventListener('click', () => {
+      state.rotationAngle = (state.rotationAngle + 90) % 360;
+      initEditor(true);
+    });
+
+    // Re-detectar bordes y texto automáticamente
+    document.getElementById('btn-auto-detect').addEventListener('click', () => {
+      state.cropRect = autoDetectTagBounds();
+      drawEditorCanvas();
+      showToast('Bordes recalculados', 'success');
+    });
+
+    // Restablecer selección a toda la imagen
+    document.getElementById('btn-reset-bounds').addEventListener('click', () => {
+      state.cropRect = {
+        x: 0,
+        y: 0,
+        w: cropCanvas.width,
+        h: cropCanvas.height
+      };
+      drawEditorCanvas();
+      showToast('Marco extendido al 100%');
+    });
+
+    document.getElementById('btn-back-to-capture').addEventListener('click', () => {
+      goToStep(1);
+    });
+
+    // Función OCR especializada en encontrar patrones SAP (10xxxxxxx) con preprocesamiento multi-umbral
+    async function extractSapNumber(canvasElement) {
+      ocrStatusCard.className = 'p-3 rounded-xl border border-sky-500/30 bg-sky-500/10 text-sky-300 flex items-center justify-between text-xs transition';
+      ocrStatusIcon.setAttribute('data-lucide', 'loader-2');
+      ocrStatusIcon.className = 'w-4 h-4 text-sky-400 animate-spin';
+      ocrStatusText.innerText = 'Escaneando etiqueta en busca del SAP (10xxxxxxx)...';
+      ocrStatusCard.classList.remove('hidden');
+      refreshIcons();
+
+      try {
+        // 1. Re-escalar para que el texto tenga al menos 40-60px de altura efectiva
+        const scaleFactor = Math.max(1.5, Math.min(3, 1200 / Math.max(canvasElement.width, canvasElement.height)));
+        const targetW = Math.round(canvasElement.width * scaleFactor);
+        const targetH = Math.round(canvasElement.height * scaleFactor);
+
+        const procCanvas = document.createElement('canvas');
+        procCanvas.width = targetW;
+        procCanvas.height = targetH;
+        const pCtx = procCanvas.getContext('2d');
+        pCtx.imageSmoothingEnabled = true;
+        pCtx.imageSmoothingQuality = 'high';
+        pCtx.drawImage(canvasElement, 0, 0, targetW, targetH);
+
+        const imgData = pCtx.getImageData(0, 0, targetW, targetH);
+        const d = imgData.data;
+        const total = targetW * targetH;
+
+        // Convertir a escala de grises y calcular contraste/luminancia promedio
+        const gray = new Uint8Array(total);
+        let sumGray = 0;
+        for (let i = 0; i < total; i++) {
+          const idx = i * 4;
+          const g = Math.round(0.299 * d[idx] + 0.587 * d[idx + 1] + 0.114 * d[idx + 2]);
+          gray[i] = g;
+          sumGray += g;
+        }
+        const avgGray = sumGray / total;
+
+        // Umbral adaptativo básico para resaltar texto
+        for (let i = 0; i < total; i++) {
+          const idx = i * 4;
+          // Estiramiento de contraste dinámico
+          const val = gray[i] < avgGray * 0.92 ? 0 : 255;
+          d[idx] = val;
+          d[idx + 1] = val;
+          d[idx + 2] = val;
+        }
+        pCtx.putImageData(imgData, 0, 0);
+
+        // Helper para buscar el patrón SAP 10xxxxxx en cualquier cadena
+        const findSapInText = (text) => {
+          if (!text) return null;
+          // Reemplazos de confusiones comunes en fuentes OCR (O, o, D, Q -> 0; I, l, |, ! -> 1; S, s -> 5; B -> 8)
+          const cleanText = text
+            .replace(/[oODQ]/g, '0')
+            .replace(/[Il|!]/g, '1')
+            .replace(/[Ss]/g, '5');
+
+          // 1. Patrón estricto estándar de 8 a 10 dígitos que empiece por 10
+          let m = cleanText.match(/\b(10\d{6,8})\b/);
+          if (m) return m[1];
+
+          // 2. Patrón sin límites de palabra (en caso de que venga pegado a prefijos tipo "SAP:10124324" o "No:10124324")
+          m = cleanText.match(/(?:SAP|NO|ID|COD|NUM|CODE|TAG)?[:.\s_-]*(10\d{6,8})/i);
+          if (m && m[1]) return m[1];
+
+          // 3. Patrón de 7 u 8 dígitos generales que empiecen con 10
+          m = cleanText.match(/(10\d{5,8})/);
+          if (m) return m[1];
+
+          return null;
+        };
+
+        // PASADA 1: OCR sobre imagen optimizada en alto contraste
+        let workerResult = await Tesseract.recognize(procCanvas, 'eng', {
+          tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-./_ ',
+          tessedit_pageseg_mode: '6' // Asumir bloque uniforme de texto
+        });
+
+        let detected = findSapInText(workerResult.data.text);
+
+        // PASADA 2: Si no se encontró, probar con la imagen original directa (por si la binarización cortó trazos finos)
+        if (!detected) {
+          workerResult = await Tesseract.recognize(canvasElement, 'eng', {
+            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-./_ ',
+            tessedit_pageseg_mode: '11' // Modo texto esparcido
+          });
+          detected = findSapInText(workerResult.data.text);
+        }
+
+        // PASADA 3: Probar invirtiendo colores (para placas metálicas oscuras o con letras grabadas blancas)
+        if (!detected) {
+          const invCanvas = document.createElement('canvas');
+          invCanvas.width = targetW;
+          invCanvas.height = targetH;
+          const iCtx = invCanvas.getContext('2d');
+          iCtx.drawImage(procCanvas, 0, 0);
+          const iData = iCtx.getImageData(0, 0, targetW, targetH);
+          const id = iData.data;
+          for (let i = 0; i < id.length; i += 4) {
+            id[i] = 255 - id[i];
+            id[i + 1] = 255 - id[i + 1];
+            id[i + 2] = 255 - id[i + 2];
+          }
+          iCtx.putImageData(iData, 0, 0);
+
+          workerResult = await Tesseract.recognize(invCanvas, 'eng', {
+            tessedit_char_whitelist: '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz:-./_ ',
+            tessedit_pageseg_mode: '6'
+          });
+          detected = findSapInText(workerResult.data.text);
+        }
+
+        if (detected) {
+          inputSap.value = detected;
+          sapError.classList.add('hidden');
+          updateFileNamePreview();
+
+          ocrStatusCard.className = 'p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 flex items-center justify-between text-xs transition';
+          ocrStatusIcon.setAttribute('data-lucide', 'check-circle-2');
+          ocrStatusIcon.className = 'w-4 h-4 text-emerald-400';
+          ocrStatusText.innerText = `Número SAP detectado: ${detected}`;
+          ocrDetectedBadge.classList.remove('hidden');
+          showToast(`SAP ${detected} detectado con éxito`);
+        } else {
+          ocrStatusCard.className = 'p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 flex items-center justify-between text-xs transition';
+          ocrStatusIcon.setAttribute('data-lucide', 'alert-triangle');
+          ocrStatusIcon.className = 'w-4 h-4 text-amber-400';
+          ocrStatusText.innerText = 'No se reconoció automáticamente el formato 10xxxxxxx. Ingrésalo manualmente.';
+          ocrDetectedBadge.classList.add('hidden');
+        }
+      } catch (err) {
+        console.error('Error en OCR:', err);
+        ocrStatusCard.className = 'p-3 rounded-xl border border-slate-700 bg-slate-900 text-slate-400 flex items-center justify-between text-xs transition';
+        ocrStatusIcon.setAttribute('data-lucide', 'info');
+        ocrStatusIcon.className = 'w-4 h-4 text-slate-400';
+        ocrStatusText.innerText = 'No se pudo completar el escaneo OCR. Ingresa el SAP manualmente.';
+      } finally {
+        refreshIcons();
+      }
+    }
+
+    let lastFinalCanvas = null;
+
+    // Confirmar y generar el recorte JPG final
+    document.getElementById('btn-apply-crop').addEventListener('click', async () => {
+      const r = state.cropRect;
+      const cropW = Math.max(30, Math.round(r.w));
+      const cropH = Math.max(30, Math.round(r.h));
+
+      const finalCanvas = document.createElement('canvas');
+      finalCanvas.width = cropW;
+      finalCanvas.height = cropH;
+      const fCtx = finalCanvas.getContext('2d');
+
+      // Fondo blanco en caso de bordes transparentes
+      fCtx.fillStyle = '#ffffff';
+      fCtx.fillRect(0, 0, cropW, cropH);
+
+      // Copiar porción seleccionada
+      fCtx.drawImage(
+        rotatedBufferCanvas,
+        Math.round(r.x), Math.round(r.y), cropW, cropH,
+        0, 0, cropW, cropH
+      );
+
+      lastFinalCanvas = finalCanvas;
+
+      finalCanvas.toBlob(async (blob) => {
+        state.croppedBlob = blob;
+        finalPreviewImg.src = URL.createObjectURL(blob);
+        imageDimensions.innerText = `Resolución: ${cropW} × ${cropH} px`;
+        goToStep(3);
+
+        // Disparar OCR automáticamente sobre el área recortada
+        await extractSapNumber(finalCanvas);
+      }, 'image/jpeg', 0.95);
+    });
+
+    btnRetryOcr.addEventListener('click', () => {
+      if (lastFinalCanvas) {
+        extractSapNumber(lastFinalCanvas);
+      }
+    });
+
+    document.getElementById('btn-re-crop').addEventListener('click', () => {
+      goToStep(2);
+    });
+
+    // Formulario de datos SAP
+    function getSelectedService() {
+      const selected = document.querySelector('input[name="service-type"]:checked');
+      return selected ? selected.value : 'mantenimiento';
+    }
+
+    // Genera la fecha actual en formato ddmmaa (ej. 061126)
+    function getFormattedDateDDMMAA(d = new Date()) {
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = String(d.getFullYear()).slice(-2);
+      return `${day}${month}${year}`;
+    }
+
+    function generateFileName() {
+      const sap = inputSap.value.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+      const service = getSelectedService();
+      const datePart = getFormattedDateDDMMAA();
+      const sapPart = sap.length > 0 ? sap : '[SAP]';
+      return `${sapPart}_${service}_${datePart}.jpg`;
+    }
+
+    function updateFileNamePreview() {
+      labelFilename.innerText = generateFileName();
+    }
+
+    inputSap.addEventListener('input', () => {
+      if (inputSap.value.trim().length > 0) {
+        sapError.classList.add('hidden');
+      }
+      updateFileNamePreview();
+    });
+
+    document.querySelectorAll('input[name="service-type"]').forEach((radio) => {
+      radio.addEventListener('change', () => {
+        document.querySelectorAll('.service-radio-card').forEach((card) => {
+          card.classList.remove('border-sky-500', 'bg-sky-500/10');
+          card.classList.add('border-slate-700', 'bg-slate-950/60');
+          const icon = card.querySelector('i');
+          const span = card.querySelector('span');
+          if (icon) icon.className = icon.className.replace('text-sky-400', 'text-slate-400');
+          if (span) {
+            span.classList.remove('text-sky-300', 'font-semibold');
+            span.classList.add('text-slate-300', 'font-medium');
+          }
+        });
+
+        const activeCard = radio.closest('.service-radio-card');
+        activeCard.classList.remove('border-slate-700', 'bg-slate-950/60');
+        activeCard.classList.add('border-sky-500', 'bg-sky-500/10');
+        const icon = activeCard.querySelector('i');
+        const span = activeCard.querySelector('span');
+        if (icon) icon.className = icon.className.replace('text-slate-400', 'text-sky-400');
+        if (span) {
+          span.classList.remove('text-slate-300', 'font-medium');
+          span.classList.add('text-sky-300', 'font-semibold');
+        }
+
+        updateFileNamePreview();
+      });
+    });
+
+    // Gestión de Configuración SharePoint
+    function updateSpUIState() {
+      const isConfigured = state.sharePoint.enabled && state.sharePoint.webhookUrl.trim().length > 0;
+      if (isConfigured) {
+        spIndicator.classList.remove('hidden');
+        spDestinationLabel.classList.remove('hidden');
+        btnSaveText.innerText = 'Guardar y Subir a SharePoint';
+        btnSaveIcon.setAttribute('data-lucide', 'cloud-upload');
+      } else {
+        spIndicator.classList.add('hidden');
+        spDestinationLabel.classList.add('hidden');
+        btnSaveText.innerText = 'Guardar y Descargar JPG';
+        btnSaveIcon.setAttribute('data-lucide', 'download');
+      }
+      refreshIcons();
+    }
+
+    btnToggleSpConfig.addEventListener('click', () => {
+      spWebhookUrlInput.value = state.sharePoint.webhookUrl;
+      spEnabledToggle.checked = state.sharePoint.enabled;
+      spModal.classList.remove('hidden');
+    });
+
+    function closeSpModal() {
+      spModal.classList.add('hidden');
+    }
+
+    btnCloseSpModal.addEventListener('click', closeSpModal);
+    btnCancelSp.addEventListener('click', closeSpModal);
+
+    btnSaveSpConfig.addEventListener('click', () => {
+      state.sharePoint.webhookUrl = spWebhookUrlInput.value.trim();
+      state.sharePoint.enabled = spEnabledToggle.checked;
+
+      localStorage.setItem('sp_webhook_url', state.sharePoint.webhookUrl);
+      localStorage.setItem('sp_enabled', state.sharePoint.enabled ? 'true' : 'false');
+
+      updateSpUIState();
+      closeSpModal();
+      showToast('Configuración de SharePoint guardada', 'success');
+    });
+
+    // Convertir Blob a Base64 para envío por Webhook
+    function blobToBase64(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    // Subida automática a SharePoint mediante Webhook / Power Automate
+    async function uploadToSharePoint(blob, fileName, sapNumber, serviceType) {
+      if (!state.sharePoint.enabled || !state.sharePoint.webhookUrl) {
+        return false;
+      }
+
+      const base64Data = await blobToBase64(blob);
+      const payload = {
+        fileName: fileName,
+        sapNumber: sapNumber,
+        serviceType: serviceType,
+        contentType: 'image/jpeg',
+        contentBytes: base64Data,
+        timestamp: new Date().toISOString()
+      };
+
+      const response = await fetch(state.sharePoint.webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Servidor SharePoint respondió con estado: ${response.status}`);
+      }
+
+      return true;
+    }
+
+    // Guardar y Descargar JPG / Sincronizar con SharePoint
+    document.getElementById('btn-save-download').addEventListener('click', async () => {
+      const sap = inputSap.value.trim().replace(/[^a-zA-Z0-9_-]/g, '');
+      if (!sap) {
+        sapError.classList.remove('hidden');
+        inputSap.focus();
+        showToast('Debes ingresar un número SAP válido', 'error');
+        return;
+      }
+
+      if (!state.croppedBlob) {
+        showToast('No hay imagen recortada disponible', 'error');
+        return;
+      }
+
+      const service = getSelectedService();
+      const finalFileName = generateFileName();
+      const url = URL.createObjectURL(state.croppedBlob);
+
+      // Descarga local siempre garantizada (para no perder el archivo)
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = finalFileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      let spSuccess = false;
+
+      // Envío automático a SharePoint si está activo
+      if (state.sharePoint.enabled && state.sharePoint.webhookUrl) {
+        btnSaveText.innerText = 'Subiendo a SharePoint...';
+        btnSaveIcon.setAttribute('data-lucide', 'loader-2');
+        btnSaveIcon.classList.add('animate-spin');
+        refreshIcons();
+
+        try {
+          await uploadToSharePoint(state.croppedBlob, finalFileName, sap, service);
+          spSuccess = true;
+          showToast(`Guardado y subido a SharePoint: ${finalFileName}`, 'success');
+        } catch (err) {
+          console.error('Error al subir a SharePoint:', err);
+          showToast('Descargado localmente (falló la subida a SharePoint)', 'error');
+        } finally {
+          btnSaveIcon.classList.remove('animate-spin');
+          updateSpUIState();
+        }
+      } else {
+        showToast(`Guardado localmente: ${finalFileName}`, 'success');
+      }
+
+      addToHistory({
+        sap: sap,
+        service: service,
+        fileName: finalFileName,
+        url: url,
+        uploadedToSP: spSuccess,
+        date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      });
+
+      setTimeout(() => {
+        inputSap.value = '';
+        goToStep(1);
+      }, 1200);
+    });
+
+    function addToHistory(item) {
+      state.history.unshift(item);
+      updateHistoryUI();
+    }
+
+    function updateHistoryUI() {
+      const badge = document.getElementById('badge-count');
+      const totalSpan = document.getElementById('history-total');
+      const listContainer = document.getElementById('history-list');
+
+      if (state.history.length > 0) {
+        badge.classList.remove('hidden');
+        badge.innerText = state.history.length;
+      } else {
+        badge.classList.add('hidden');
+      }
+
+      totalSpan.innerText = `${state.history.length} etiquetas procesadas`;
+
+      if (state.history.length === 0) {
+        listContainer.innerHTML = `
+          <div class="h-64 flex flex-col items-center justify-center text-slate-500 text-center">
+            <i data-lucide="inbox" class="w-10 h-10 mb-2 stroke-1"></i>
+            <p class="text-sm">Aún no hay etiquetas registradas en esta sesión.</p>
+          </div>
+        `;
+        refreshIcons();
+        return;
+      }
+
+      listContainer.innerHTML = state.history.map((item) => `
+        <div class="flex items-center gap-3 p-3 bg-slate-950 border border-slate-800 rounded-xl hover:border-slate-700 transition">
+          <img src="${item.url}" alt="${item.fileName}" class="w-14 h-14 object-cover rounded-lg border border-slate-700 flex-shrink-0 bg-black" />
+          <div class="flex-1 min-w-0">
+            <h4 class="font-mono text-xs font-bold text-sky-300 truncate">${item.fileName}</h4>
+            <div class="flex items-center gap-1.5 mt-1 flex-wrap">
+              <span class="inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-slate-800 text-slate-300">
+                ${item.service}
+              </span>
+              ${item.uploadedToSP ? '<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><i data-lucide="cloud-check" class="w-3 h-3"></i> SP</span>' : ''}
+              <span class="text-[10px] text-slate-500">${item.date}</span>
+            </div>
+          </div>
+          <a href="${item.url}" download="${item.fileName}" class="p-2.5 rounded-lg bg-slate-800 hover:bg-sky-600 text-slate-300 hover:text-white transition flex-shrink-0" title="Descargar nuevamente">
+            <i data-lucide="download" class="w-4 h-4"></i>
+          </a>
+        </div>
+      `).join('');
+
+      refreshIcons();
+    }
+
+    const historyModal = document.getElementById('history-modal');
+    document.getElementById('btn-toggle-history').addEventListener('click', () => {
+      historyModal.classList.remove('hidden');
+    });
+
+    document.getElementById('btn-close-history').addEventListener('click', () => {
+      historyModal.classList.add('hidden');
+    });
+
+    document.getElementById('btn-clear-history').addEventListener('click', () => {
+      state.history = [];
+      updateHistoryUI();
+      showToast('Historial vaciado');
+    });
+
+    // Reajustar al cambiar orientación o tamaño
+    window.addEventListener('resize', () => {
+      if (!step2.classList.contains('hidden')) {
+        drawEditorCanvas();
+      }
+    });
+
+    // CONFIGURACIÓN DE PWA E INSTALACIÓN EN CUALQUIER CELULAR
+    let deferredPrompt = null;
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
+    // Generar Manifest dinámicamente
+    const manifestBlob = new Blob([JSON.stringify({
+      name: "Captura Etiquetas SAP",
+      short_name: "SAP Tag",
+      start_url: window.location.href,
+      display: "standalone",
+      background_color: "#020617",
+      theme_color: "#020617",
+      orientation: "portrait",
+      icons: [
+        {
+          src: "https://placehold.co/192x192/0284c7/ffffff?text=SAP",
+          sizes: "192x192",
+          type: "image/png"
+        },
+        {
+          src: "https://placehold.co/512x512/0284c7/ffffff?text=SAP",
+          sizes: "512x512",
+          type: "image/png"
+        }
+      ]
+    })], { type: 'application/json' });
+    document.getElementById('manifest-placeholder').setAttribute('href', URL.createObjectURL(manifestBlob));
+
+    // Capturar evento de instalación en Android / Chrome
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      btnInstallApp.classList.remove('hidden');
+    });
+
+    // En iOS, si no está en modo standalone, mostrar el botón para dar instrucciones
+    if (isIOS && !window.navigator.standalone) {
+      btnInstallApp.classList.remove('hidden');
+    }
+
+    btnInstallApp.addEventListener('click', async () => {
+      if (deferredPrompt) {
+        deferredPrompt.prompt();
+        const { outcome } = await deferredPrompt.userChoice;
+        if (outcome === 'accepted') {
+          btnInstallApp.classList.add('hidden');
+          showToast('App instalada con éxito', 'success');
+        }
+        deferredPrompt = null;
+      } else if (isIOS) {
+        iosInstallModal.classList.remove('hidden');
+      } else {
+        showToast('Para instalar: usa el menú de tu navegador y elige "Instalar app"', 'info');
+      }
+    });
+
+    btnCloseIosModal.addEventListener('click', () => {
+      iosInstallModal.classList.add('hidden');
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      refreshIcons();
+      updateHistoryUI();
+      updateSpUIState();
+      goToStep(1);
+    });
+  </script>
+</body>
+</html>
